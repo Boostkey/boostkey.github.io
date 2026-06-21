@@ -4,7 +4,9 @@ const defaultConfig = {
     'farm-worlds': ['farm'],
     'season-start': '2026-06-01 00:00:00',
     'newbie-playtime-hours': 30,
+    'newbie-restrict-only-spawn-and-farm': true,
     'playtime-save-interval-seconds': 300,
+    'dirty-flush-interval-seconds': 60,
     'trust-link': 'https://example.com/rules',
     'language': 'ru',
     'warning-threshold': 3,
@@ -13,7 +15,11 @@ const defaultConfig = {
     'punishment-cooldown-seconds': 60,
     'database': {
         type: 'sqlite',
-        sqlite: { file: 'antigrief.db' },
+        sqlite: {
+            file: 'antigrief.db',
+            'pool-size': 2,
+            'max-lifetime': 600000
+        },
         mysql: {
             host: 'localhost',
             port: 3306,
@@ -38,7 +44,10 @@ const defaultConfig = {
     'season-events': {
         'sleeping-days': 7,
         'mid-season-day': 30,
-        'late-season-day': 60
+        'late-season-day': 60,
+        'early-ban-immediately': true,
+        'mid-threshold': 3,
+        'late-threshold': 6
     },
     'punishments': {
         'sender-name': 'AmethystProtection',
@@ -85,6 +94,7 @@ const defaultMessages = {
         newbie_interact_entity: 'Запрещено взаимодействовать с объектами в зоне спавна.',
         newbie_interact_frame: 'Запрещено взаимодействовать с рамками в зоне спавна.',
         newbie_damage_players: 'Запрещено наносить урон игрокам.',
+        newbie_cannot_kill: 'Новички не могут убивать игроков.',
         newbie_attack_player: '&cЗапрещено бить человека.\n&7Это действие запрещено правилами сервера.',
         newbie_interact: 'Запрещено взаимодействовать с этим блоком.',
         actionbar_denied: 'Запрещено!',
@@ -130,6 +140,7 @@ const defaultMessages = {
         newbie_interact_entity: 'You cannot interact with objects in the spawn zone.',
         newbie_interact_frame: 'You cannot interact with frames in the spawn zone.',
         newbie_damage_players: 'You cannot deal damage to players.',
+        newbie_cannot_kill: 'Newcomers cannot kill players.',
         newbie_attack_player: '&cYou cannot hit a person.\n&7This action is forbidden by server rules.',
         newbie_interact: 'You cannot interact with this block.',
         actionbar_denied: 'Forbidden!',
@@ -180,7 +191,7 @@ function updateConfigFromInputs() {
             value = input.value.includes('.') ? parseFloat(value) : parseInt(value, 10);
         } else if (input.dataset.path === 'farm-worlds') {
             value = value.split(',').map(s => s.trim()).filter(Boolean);
-        } else if (input.dataset.path === 'database.mysql.use-ssl') {
+        } else if (input.dataset.path === 'database.mysql.use-ssl' || input.dataset.path === 'season-events.early-ban-immediately') {
             value = input.value === 'true';
         }
         setValue(config, path, value);
@@ -478,6 +489,8 @@ function syncLanguages() {
 
 document.addEventListener('DOMContentLoaded', () => {
     initSpace();
+    initThemeSwitcher();
+    initTabGenerator();
     updateInputsFromConfig();
     renderMessages();
     updateYamlOutput();
@@ -572,11 +585,14 @@ function initSpace() {
     const container = document.getElementById('space');
     if (!container) return;
 
-    container.innerHTML = '';
+    container.innerHTML = '<canvas id="gearCanvas" class="gear-canvas"></canvas><canvas id="circuitCanvas" class="circuit-canvas"></canvas>';
     const canvas = document.createElement('canvas');
     canvas.className = 'star-canvas';
-    container.appendChild(canvas);
+    container.insertBefore(canvas, container.firstChild);
     const ctx = canvas.getContext('2d');
+
+    initGearCanvas();
+    initCircuitCanvas();
 
     let width, height;
     function resize() {
@@ -592,6 +608,7 @@ function initSpace() {
     const connectionDistance = 80;
     const maxConnections = 2;
     const stars = [];
+    const isCore = () => document.body.classList.contains('theme-core');
     function createStar() {
         return {
             x: Math.random() * width,
@@ -622,6 +639,13 @@ function initSpace() {
 
     function draw() {
         ctx.clearRect(0, 0, width, height);
+
+        const core = isCore();
+        if (core) {
+            updateStars();
+            requestAnimationFrame(draw);
+            return;
+        }
 
         const time = Date.now() / 1000;
         stars.forEach(star => {
@@ -668,4 +692,751 @@ function initSpace() {
     }
 
     draw();
+}
+
+function initGearCanvas() {
+    const canvas = document.getElementById('gearCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    let width, height;
+    function resize() {
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = width;
+        canvas.height = height;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    const gears = [];
+    const gearCount = 6;
+    for (let i = 0; i < gearCount; i++) {
+        gears.push({
+            x: Math.random() * width,
+            y: Math.random() * height,
+            radius: 40 + Math.random() * 80,
+            teeth: 8 + Math.floor(Math.random() * 8),
+            speed: (Math.random() - 0.5) * 0.01,
+            angle: Math.random() * Math.PI * 2,
+            opacity: 0.08 + Math.random() * 0.12
+        });
+    }
+
+    function drawGear(g) {
+        ctx.save();
+        ctx.translate(g.x, g.y);
+        ctx.rotate(g.angle);
+        ctx.globalAlpha = g.opacity;
+        ctx.strokeStyle = '#0aa6ed';
+        ctx.lineWidth = 2;
+        ctx.lineJoin = 'round';
+
+        const outerRadius = g.radius;
+        const innerRadius = g.radius * 0.70;
+        const holeRadius = g.radius * 0.22;
+        const teeth = g.teeth;
+        const step = Math.PI * 2 / teeth;
+        const toothWidth = step * 0.42;
+        const baseWidth = step - toothWidth;
+        const toothDepth = g.radius * 0.22;
+        const baseRadius = outerRadius - toothDepth;
+
+        function polar(angle, radius) {
+            return {
+                x: Math.cos(angle) * radius,
+                y: Math.sin(angle) * radius
+            };
+        }
+
+        ctx.beginPath();
+        for (let i = 0; i < teeth; i++) {
+            const toothCenter = i * step;
+            const leftRoot = toothCenter - baseWidth / 2;
+            const leftFlank = toothCenter - toothWidth / 2;
+            const topLeft = toothCenter - toothWidth * 0.35;
+            const topRight = toothCenter + toothWidth * 0.35;
+            const rightFlank = toothCenter + toothWidth / 2;
+            const rightRoot = toothCenter + baseWidth / 2;
+
+            const p1 = polar(leftRoot, baseRadius);
+            const p2 = polar(leftFlank, baseRadius);
+            const p3 = polar(topLeft, outerRadius);
+            const p4 = polar(topRight, outerRadius);
+            const p5 = polar(rightFlank, baseRadius);
+            const p6 = polar(rightRoot, baseRadius);
+
+            if (i === 0) ctx.moveTo(p1.x, p1.y);
+            else ctx.lineTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.lineTo(p3.x, p3.y);
+            ctx.lineTo(p4.x, p4.y);
+            ctx.lineTo(p5.x, p5.y);
+            ctx.lineTo(p6.x, p6.y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(0, 0, holeRadius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, width, height);
+        const isCore = document.body.classList.contains('theme-core');
+        if (!isCore) {
+            requestAnimationFrame(draw);
+            return;
+        }
+        gears.forEach(g => {
+            g.angle += g.speed;
+            g.x += Math.sin(Date.now() / 3000 + g.radius) * 0.2;
+            g.y += Math.cos(Date.now() / 4000 + g.radius) * 0.2;
+            if (g.x < -g.radius) g.x = width + g.radius;
+            if (g.x > width + g.radius) g.x = -g.radius;
+            if (g.y < -g.radius) g.y = height + g.radius;
+            if (g.y > height + g.radius) g.y = -g.radius;
+            drawGear(g);
+        });
+        requestAnimationFrame(draw);
+    }
+    draw();
+}
+
+function initCircuitCanvas() {
+    const canvas = document.getElementById('circuitCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    let width, height;
+    function resize() {
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = width;
+        canvas.height = height;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    const totalComponents = 22;
+    const components = [];
+    const center = { x: width * 0.5, y: height * 0.50 };
+    const cpuSize = 62;
+
+    const gridRows = 4;
+    const gridCols = 6;
+    const cellW = (width - 80) / gridCols;
+    const cellH = (height - 80) / gridRows;
+    const gridCells = [];
+    for (let r = 0; r < gridRows; r++) {
+        for (let c = 0; c < gridCols; c++) {
+            const gx = 40 + c * cellW + cellW / 2;
+            const gy = 40 + r * cellH + cellH / 2;
+            if (Math.hypot(gx - center.x, gy - center.y) > cpuSize + 60) {
+                gridCells.push({ x: gx, y: gy });
+            }
+        }
+    }
+
+    const cpuPins = [];
+    const pinsPerSide = 6;
+    for (let side = 0; side < 4; side++) {
+        for (let i = 0; i < pinsPerSide; i++) {
+            const t = (i + 1) / (pinsPerSide + 1);
+            let px, py, dx = 0, dy = 0;
+            if (side === 0) { px = center.x - cpuSize + t * cpuSize * 2; py = center.y - cpuSize; dy = -1; }
+            else if (side === 1) { px = center.x + cpuSize; py = center.y - cpuSize + t * cpuSize * 2; dx = 1; }
+            else if (side === 2) { px = center.x - cpuSize + t * cpuSize * 2; py = center.y + cpuSize; dy = 1; }
+            else { px = center.x - cpuSize; py = center.y - cpuSize + t * cpuSize * 2; dx = -1; }
+            cpuPins.push({ x: px + dx * 8, y: py + dy * 8, ox: px, oy: py, dx, dy });
+        }
+    }
+
+    function randomPos() {
+        let x, y, d;
+        let attempts = 0;
+        const margin = 40;
+        const minDist = cpuSize + 70;
+        do {
+            x = margin + Math.random() * (width - margin * 2);
+            y = margin + Math.random() * (height - margin * 2);
+            d = Math.hypot(x - center.x, y - center.y);
+            attempts++;
+        } while (d < minDist && attempts < 300);
+        return { x, y };
+    }
+
+    function randomGridPos() {
+        if (gridCells.length === 0) return randomPos();
+        const idx = Math.floor(Math.random() * gridCells.length);
+        const cell = gridCells[idx];
+        gridCells.splice(idx, 1);
+        return {
+            x: cell.x + (Math.random() - 0.5) * cellW * 0.5,
+            y: cell.y + (Math.random() - 0.5) * cellH * 0.5
+        };
+    }
+
+    for (let i = 0; i < totalComponents; i++) {
+        const pos = randomGridPos();
+        const type = i < 5 ? 'transistor' : (i < 10 ? 'chip' : 'node');
+        const pin = cpuPins[i % cpuPins.length];
+        components.push({
+            x: pos.x,
+            y: pos.y,
+            w: type === 'chip' ? 34 + Math.random() * 36 : (type === 'transistor' ? 32 : 12),
+            h: type === 'chip' ? 22 + Math.random() * 20 : (type === 'transistor' ? 28 : 12),
+            type,
+            pins: type === 'chip' ? 4 + Math.floor(Math.random() * 4) : 0,
+            opacity: 0.08 + Math.random() * 0.12,
+            pulse: Math.random() * Math.PI * 2,
+            cpuPin: pin,
+            layer: 0.2 + Math.random() * 0.8
+        });
+    }
+
+    function drawTransistor(c) {
+        ctx.save();
+        ctx.globalAlpha = c.opacity;
+        ctx.strokeStyle = '#0aa6ed';
+        ctx.lineWidth = 1.5;
+        const w = c.w;
+        const h = c.h;
+        const leg = 7;
+
+        ctx.beginPath();
+        ctx.moveTo(c.x - w / 2, c.y - h / 2 - leg);
+        ctx.lineTo(c.x - w / 2, c.y - h / 2);
+        ctx.lineTo(c.x + w / 2, c.y - h / 2);
+        ctx.lineTo(c.x + w / 2, c.y - h / 2 - leg);
+        ctx.moveTo(c.x - w / 2, c.y + h / 2 + leg);
+        ctx.lineTo(c.x - w / 2, c.y + h / 2);
+        ctx.lineTo(c.x + w / 2, c.y + h / 2);
+        ctx.lineTo(c.x + w / 2, c.y + h / 2 + leg);
+        ctx.stroke();
+
+        ctx.strokeRect(c.x - w / 2, c.y - h / 2, w, h);
+
+        ctx.beginPath();
+        ctx.arc(c.x - w / 2 + 4, c.y - h / 2 + 4, 1.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#0aa6ed';
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(c.x - w / 2 + 6, c.y - 2);
+        ctx.lineTo(c.x + w / 2 - 4, c.y - 2);
+        ctx.moveTo(c.x - w / 2 + 6, c.y + 3);
+        ctx.lineTo(c.x + w / 2 - 4, c.y + 3);
+        ctx.stroke();
+
+        ctx.restore();
+    }
+
+    function drawChip(c) {
+        ctx.save();
+        ctx.globalAlpha = c.opacity;
+        ctx.strokeStyle = '#0aa6ed';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(c.x - c.w / 2, c.y - c.h / 2, c.w, c.h);
+        const pinSize = 4;
+        for (let i = 0; i < c.pins; i++) {
+            const px = c.x - c.w / 2 + (c.w / (c.pins + 1)) * (i + 1);
+            ctx.beginPath();
+            ctx.moveTo(px, c.y - c.h / 2);
+            ctx.lineTo(px, c.y - c.h / 2 - pinSize);
+            ctx.moveTo(px, c.y + c.h / 2);
+            ctx.lineTo(px, c.y + c.h / 2 + pinSize);
+            ctx.stroke();
+        }
+        const glow = 0.4 + 0.3 * Math.sin(Date.now() / 500 + c.pulse);
+        ctx.fillStyle = `rgba(10, 166, 237, ${glow * 0.15})`;
+        ctx.fillRect(c.x - c.w / 2 + 4, c.y - c.h / 2 + 4, c.w - 8, c.h - 8);
+        ctx.restore();
+    }
+
+    function drawNode(c) {
+        ctx.save();
+        ctx.globalAlpha = c.opacity + 0.15;
+        ctx.fillStyle = '#0aa6ed';
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#0aa6ed';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, 7, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawCPU() {
+        const time = Date.now() / 1000;
+        const glow = 0.5 + 0.3 * Math.sin(time * 2);
+        ctx.save();
+        ctx.globalAlpha = 0.20 + glow * 0.12;
+        ctx.strokeStyle = '#0aa6ed';
+        ctx.lineWidth = 2.5;
+        ctx.strokeRect(center.x - cpuSize, center.y - cpuSize, cpuSize * 2, cpuSize * 2);
+        ctx.fillStyle = `rgba(10, 166, 237, ${0.06 + glow * 0.06})`;
+        ctx.fillRect(center.x - cpuSize + 4, center.y - cpuSize + 4, cpuSize * 2 - 8, cpuSize * 2 - 8);
+
+        ctx.fillStyle = `rgba(10, 166, 237, ${0.5 + glow * 0.25})`;
+        ctx.beginPath();
+        ctx.arc(center.x, center.y, cpuSize * 0.45, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.font = '700 12px Segoe UI, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#050810';
+        ctx.fillText('CORE', center.x, center.y - 5);
+        ctx.font = '400 9px Segoe UI, sans-serif';
+        ctx.fillText('CPU', center.x, center.y + 7);
+
+        ctx.globalAlpha = 0.55 + glow * 0.2;
+        ctx.lineWidth = 1.5;
+        cpuPins.forEach(pin => {
+            ctx.beginPath();
+            ctx.moveTo(pin.ox, pin.oy);
+            ctx.lineTo(pin.x, pin.y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(pin.x, pin.y, 2.5, 0, Math.PI * 2);
+            ctx.fillStyle = '#0aa6ed';
+            ctx.fill();
+        });
+        ctx.restore();
+    }
+
+    function drawTrace(startX, startY, endX, endY, alpha = 0.09, offset = 0) {
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = '#0aa6ed';
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([5, 8]);
+        const dashOffset = -((Date.now() / 40 + offset) % 13);
+        ctx.lineDashOffset = dashOffset;
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        const midX = (startX + endX) / 2;
+        ctx.lineTo(midX, startY);
+        ctx.lineTo(midX, endY);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, width, height);
+        const isCore = document.body.classList.contains('theme-core');
+        if (!isCore) {
+            requestAnimationFrame(draw);
+            return;
+        }
+        center.x = width * 0.5;
+        center.y = height * 0.50;
+
+        components.forEach((c, i) => {
+            c.cpuPin = cpuPins[i % cpuPins.length];
+        });
+
+        drawCPU();
+
+        components.forEach((c, i) => {
+            if (c.type === 'transistor') drawTransistor(c);
+            else if (c.type === 'chip') drawChip(c);
+            else drawNode(c);
+        });
+
+        components.forEach((c, i) => {
+            const startX = c.x;
+            const startY = c.y;
+            const endX = c.cpuPin.x;
+            const endY = c.cpuPin.y;
+            const alpha = 0.06 + c.layer * 0.07;
+            drawTrace(startX, startY, endX, endY, alpha, i * 7);
+        });
+
+        components.forEach((c, i) => {
+            const next = components[(i + 1) % components.length];
+            drawTrace(c.x, c.y, next.x, next.y, 0.04, i * 11);
+            const far = components[(i + 5) % components.length];
+            drawTrace(c.x, c.y, far.x, far.y, 0.03, i * 17);
+        });
+
+        requestAnimationFrame(draw);
+    }
+    draw();
+}
+
+function initThemeSwitcher() {
+    const saved = localStorage.getItem('amethyst-theme') || 'amethyst';
+    setTheme(saved, false);
+
+    const toggle = document.getElementById('theme-toggle');
+    const menu = document.getElementById('theme-menu');
+
+    toggle?.addEventListener('click', () => {
+        const isOpen = !menu.classList.contains('hidden');
+        menu.classList.toggle('hidden', isOpen);
+        toggle.setAttribute('aria-expanded', String(!isOpen));
+        toggle.classList.toggle('open', !isOpen);
+    });
+
+    document.querySelectorAll('.theme-option').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const theme = btn.dataset.theme;
+            setTheme(theme);
+            localStorage.setItem('amethyst-theme', theme);
+            menu.classList.add('hidden');
+            toggle.classList.remove('open');
+            toggle.setAttribute('aria-expanded', 'false');
+        });
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!toggle || !menu || toggle.contains(e.target) || menu.contains(e.target)) return;
+        menu.classList.add('hidden');
+        toggle.classList.remove('open');
+        toggle.setAttribute('aria-expanded', 'false');
+    });
+}
+
+function setTheme(theme, save = true) {
+    document.body.classList.toggle('theme-core', theme === 'core');
+    const label = theme === 'core' ? 'Core' : 'Amethyst';
+    const currentLabel = document.getElementById('theme-current');
+    if (currentLabel) currentLabel.textContent = label;
+    document.querySelectorAll('.theme-option').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.theme === theme);
+    });
+    if (save) localStorage.setItem('amethyst-theme', theme);
+}
+
+function initTabGenerator() {
+    const colorCountInput = document.getElementById('tab-color-count');
+    const colorsContainer = document.getElementById('tab-colors');
+    const generateBtn = document.getElementById('generate-tab');
+    const downloadBtn = document.getElementById('download-tab');
+    const output = document.getElementById('tab-output');
+    const typeSelect = document.getElementById('tab-animation-type');
+    const textInput = document.getElementById('tab-text');
+    const intervalInput = document.getElementById('tab-interval');
+    const formatCheckboxes = document.querySelectorAll('#tab-formats input[type="checkbox"]');
+
+    if (!colorCountInput || !colorsContainer || !generateBtn || !output) return;
+
+    const magicChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    const MAGIC_INTERVAL = 50;
+    let magicInterval = null;
+
+    function getActiveFormats() {
+        return Array.from(formatCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
+    }
+
+    function buildFormatPrefix() {
+        return getActiveFormats().map(code => `&${code}`).join('');
+    }
+
+    function buildFormatStyle() {
+        const styles = [];
+        const codes = getActiveFormats();
+        if (codes.includes('l')) styles.push('font-weight:700');
+        if (codes.includes('o')) styles.push('font-style:italic');
+        const decorations = [];
+        if (codes.includes('n')) decorations.push('underline');
+        if (codes.includes('m')) decorations.push('line-through');
+        if (decorations.length) styles.push(`text-decoration:${decorations.join(' ')}`);
+        return styles.join(';');
+    }
+
+    function randomChar() {
+        return magicChars[Math.floor(Math.random() * magicChars.length)];
+    }
+
+    function startMagicAnimation(container, renderHtml) {
+        if (magicInterval) clearInterval(magicInterval);
+        if (!getActiveFormats().includes('k')) return;
+        const text = textInput.value || 'YourServer';
+        magicInterval = setInterval(() => {
+            const scrambled = Array.from(text).map(randomChar).join('');
+            container.innerHTML = renderHtml(scrambled);
+        }, MAGIC_INTERVAL);
+    }
+
+    function stopMagicAnimation() {
+        if (magicInterval) {
+            clearInterval(magicInterval);
+            magicInterval = null;
+        }
+    }
+
+    const defaultPalette = ['#00F5FF', '#20F6FF', '#40F8FF', '#60F9FF', '#80FAFF', '#9FFBFF', '#BFFDFF', '#DFFEFF', '#FFFFFF', '#FF5555', '#55FF55', '#5555FF', '#FFFF55', '#FF55FF', '#55FFFF', '#FFAA00', '#AA00AA', '#00AAAA', '#AA0000', '#0000AA', '#00AA00', '#00AAAA', '#AAAAAA', '#555555', '#FF55FF', '#55FF55', '#FF5555', '#AA55FF', '#55AAFF', '#FFAA55', '#55FFAA', '#AAFF55'];
+    const STORAGE_KEY = 'amethyst-tab-colors';
+
+    function loadSavedColors() {
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return null;
+            const count = parseInt(parsed.count, 10);
+            if (Number.isNaN(count) || count < 2 || count > 32) return null;
+            const colors = Array.isArray(parsed.colors) ? parsed.colors.filter(c => /^#[0-9A-Fa-f]{6}$/.test(c)) : [];
+            return { count, colors };
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function saveColors() {
+        try {
+            const count = parseInt(colorCountInput.value, 10) || 5;
+            const colors = Array.from(colorsContainer.querySelectorAll('input[type="color"]')).map(i => i.value);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({ count, colors }));
+        } catch (e) {
+            // ignore storage errors
+        }
+    }
+
+    function renderColorInputs(savedColors) {
+        let count = parseInt(colorCountInput.value, 10);
+        if (Number.isNaN(count)) count = 2;
+        count = Math.max(2, Math.min(32, count));
+        colorCountInput.value = count;
+        const current = Array.from(colorsContainer.querySelectorAll('input[type="color"]')).map(i => i.value);
+        colorsContainer.innerHTML = '';
+        for (let i = 0; i < count; i++) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'tab-color-item';
+            const input = document.createElement('input');
+            input.type = 'color';
+            input.value = savedColors?.[i] || current[i] || defaultPalette[i % defaultPalette.length];
+            const label = document.createElement('span');
+            label.textContent = `Цвет ${i + 1}`;
+            wrapper.appendChild(input);
+            wrapper.appendChild(label);
+            colorsContainer.appendChild(wrapper);
+        }
+    }
+
+    function getColors() {
+        return Array.from(colorsContainer.querySelectorAll('input[type="color"]')).map(i => i.value.replace('#', '').toUpperCase());
+    }
+
+    function colorAt(colors, index) {
+        const n = colors.length;
+        return colors[((index % n) + n) % n];
+    }
+
+    function hexToRgb(hex) {
+        const v = hex.replace('#', '');
+        return {
+            r: parseInt(v.substring(0, 2), 16),
+            g: parseInt(v.substring(2, 4), 16),
+            b: parseInt(v.substring(4, 6), 16)
+        };
+    }
+
+    function rgbToHex(r, g, b) {
+        return [r, g, b].map(c => Math.max(0, Math.min(255, Math.round(c))).toString(16).padStart(2, '0')).join('').toUpperCase();
+    }
+
+    function interpolateColor(c1, c2, t) {
+        return rgbToHex(
+            c1.r + (c2.r - c1.r) * t,
+            c1.g + (c2.g - c1.g) * t,
+            c1.b + (c2.b - c1.b) * t
+        );
+    }
+
+    function expandColors(colors, targetCount) {
+        if (colors.length >= targetCount) return colors;
+        const result = [];
+        const segments = colors.length - 1;
+        const stepsPerSegment = Math.max(1, Math.ceil((targetCount - 1) / segments));
+        const totalNeeded = segments * stepsPerSegment + 1;
+        for (let i = 0; i < segments; i++) {
+            const c1 = hexToRgb(colors[i]);
+            const c2 = hexToRgb(colors[i + 1]);
+            for (let s = 0; s < stepsPerSegment; s++) {
+                const t = s / stepsPerSegment;
+                result.push(interpolateColor(c1, c2, t));
+            }
+        }
+        result.push(colors[colors.length - 1]);
+        return result.slice(0, targetCount);
+    }
+
+    function makeFrame(text, colors, offset) {
+        const prefix = buildFormatPrefix();
+        return Array.from(text).map((ch, i) => {
+            const color = colorAt(colors, i + offset);
+            return `&#${color}${prefix}${ch}`;
+        }).join('');
+    }
+
+    function generateFrames(type, text, colors) {
+        const n = colors.length;
+        const frames = [];
+        if (type === 'normal') {
+            for (let offset = 0; offset < n; offset++) frames.push(makeFrame(text, colors, offset));
+        } else if (type === 'reversed') {
+            for (let offset = 0; offset < n; offset++) frames.push(makeFrame(text, colors, -offset));
+        } else if (type === 'bounce') {
+            for (let offset = 0; offset < n; offset++) frames.push(makeFrame(text, colors, offset));
+            for (let offset = n - 2; offset > 0; offset--) frames.push(makeFrame(text, colors, offset));
+        } else if (type === 'ease-in-out') {
+            const maxOffset = n - 1;
+            const steps = Math.max(n * 4, 40);
+            for (let s = 0; s <= steps; s++) {
+                const t = s / steps;
+                let offset;
+                if (t <= 0.5) {
+                    const u = 2 * t;
+                    offset = maxOffset * (1 - Math.pow(1 - u, 3));
+                } else {
+                    const u = 2 * (t - 0.5);
+                    offset = maxOffset * (1 - Math.pow(u, 3));
+                }
+                frames.push(makeFrame(text, colors, Math.round(offset)));
+            }
+        } else if (type === 'fullcycle') {
+            const prefix = buildFormatPrefix();
+            for (let offset = 0; offset < n; offset++) {
+                const color = colors[offset];
+                frames.push(Array.from(text).map(ch => `&#${color}${prefix}${ch}`).join(''));
+            }
+            for (let offset = n - 2; offset > 0; offset--) {
+                const color = colors[offset];
+                frames.push(Array.from(text).map(ch => `&#${color}${prefix}${ch}`).join(''));
+            }
+        } else if (type === 'edges-left') {
+            const center = Math.floor(text.length / 2);
+            const maxOffset = Math.max(1, Math.floor(n / 2));
+            const prefix = buildFormatPrefix();
+            for (let offset = 0; offset <= maxOffset; offset++) {
+                frames.push(Array.from(text).map((ch, i) => {
+                    const color = i < center ? colorAt(colors, i + offset) : colors[center % n];
+                    return `&#${color}${prefix}${ch}`;
+                }).join(''));
+            }
+            for (let offset = maxOffset - 1; offset >= 0; offset--) {
+                frames.push(Array.from(text).map((ch, i) => {
+                    const color = i < center ? colorAt(colors, i + offset) : colors[center % n];
+                    return `&#${color}${prefix}${ch}`;
+                }).join(''));
+            }
+        } else if (type === 'edges-right') {
+            const center = Math.floor(text.length / 2);
+            const maxOffset = Math.max(1, Math.floor(n / 2));
+            const prefix = buildFormatPrefix();
+            for (let offset = 0; offset <= maxOffset; offset++) {
+                frames.push(Array.from(text).map((ch, i) => {
+                    const color = i >= center ? colorAt(colors, i - offset) : colors[center % n];
+                    return `&#${color}${prefix}${ch}`;
+                }).join(''));
+            }
+            for (let offset = maxOffset - 1; offset >= 0; offset--) {
+                frames.push(Array.from(text).map((ch, i) => {
+                    const color = i >= center ? colorAt(colors, i - offset) : colors[center % n];
+                    return `&#${color}${prefix}${ch}`;
+                }).join(''));
+            }
+        }
+        return frames;
+    }
+
+    let previewInterval = null;
+
+    function parseFrameToHtml(frame, scrambledText) {
+        const formatStyle = buildFormatStyle();
+        const parts = frame.split(/(?=&#)/);
+        const chars = scrambledText ? Array.from(scrambledText) : null;
+        return parts.map((part, i) => {
+            const match = part.match(/^&#([0-9A-Fa-f]{6})((?:&[klnom]){0,5})(.)$/);
+            if (!match) return escapeHtml(part);
+            const color = match[1].toUpperCase();
+            const char = chars ? escapeHtml(chars[i] || randomChar()) : escapeHtml(match[3]);
+            let style = `color:#${color}`;
+            if (formatStyle) style += `;${formatStyle}`;
+            const isMagic = getActiveFormats().includes('k');
+            if (isMagic) {
+                return `<span class="magic-char" style="${style}">${char}</span>`;
+            }
+            return `<span style="${style}">${char}</span>`;
+        }).join('');
+    }
+
+    function escapeHtml(str) {
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function startPreview(frames, interval) {
+        if (previewInterval) clearInterval(previewInterval);
+        stopMagicAnimation();
+        const preview = document.getElementById('tab-preview');
+        if (!preview || frames.length === 0) return;
+        let frameIndex = 0;
+        const isMagic = getActiveFormats().includes('k');
+        preview.innerHTML = parseFrameToHtml(frames[0]);
+        if (isMagic) {
+            startMagicAnimation(preview, (scrambledText) => parseFrameToHtml(frames[frameIndex], scrambledText));
+        }
+        previewInterval = setInterval(() => {
+            frameIndex = (frameIndex + 1) % frames.length;
+            if (isMagic) {
+                preview.innerHTML = parseFrameToHtml(frames[frameIndex], Array.from(textInput.value || 'YourServer').map(randomChar).join(''));
+            } else {
+                preview.innerHTML = parseFrameToHtml(frames[frameIndex]);
+            }
+        }, interval);
+    }
+
+    function generate() {
+        const text = textInput.value || 'YourServer';
+        const rawColors = getColors();
+        const type = typeSelect.value;
+        const interval = parseInt(intervalInput.value, 10) || 50;
+        const colors = expandColors(rawColors, Math.max(rawColors.length, text.length));
+        const frames = generateFrames(type, text, colors);
+        const yaml = `logo:\n  change-interval: ${interval}\n  texts:\n${frames.map(f => `  - "${f}"`).join('\n')}`;
+        output.value = yaml;
+        startPreview(frames, interval);
+    }
+
+    function download() {
+        const blob = new Blob([output.value], { type: 'text/yaml' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'tab.yml';
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    colorCountInput.addEventListener('input', () => {
+        renderColorInputs();
+        saveColors();
+        generate();
+    });
+    generateBtn.addEventListener('click', generate);
+    downloadBtn.addEventListener('click', download);
+    typeSelect.addEventListener('change', generate);
+    textInput.addEventListener('input', generate);
+    intervalInput.addEventListener('input', generate);
+    colorsContainer.addEventListener('input', () => {
+        saveColors();
+        generate();
+    });
+    formatCheckboxes.forEach(cb => cb.addEventListener('change', generate));
+
+    const saved = loadSavedColors();
+    if (saved) {
+        colorCountInput.value = saved.count;
+        renderColorInputs(saved.colors);
+    } else {
+        renderColorInputs();
+    }
+    generate();
 }

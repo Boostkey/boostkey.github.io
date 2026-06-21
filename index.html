@@ -7,8 +7,23 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div id="space" class="space"></div>
+    <div id="space" class="space">
+        <canvas id="gearCanvas" class="gear-canvas"></canvas>
+        <canvas id="circuitCanvas" class="circuit-canvas"></canvas>
+    </div>
     <div class="app">
+        <div class="theme-switcher">
+            <button class="theme-dropdown-toggle" id="theme-toggle" aria-haspopup="true" aria-expanded="false">
+                <span id="theme-current">Amethyst</span>
+                <svg class="theme-arrow" viewBox="0 0 12 8" width="12" height="8">
+                    <path d="M1 1.5L6 6.5L11 1.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </button>
+            <div class="theme-dropdown-menu hidden" id="theme-menu">
+                <button class="theme-option active" data-theme="amethyst">Amethyst</button>
+                <button class="theme-option" data-theme="core">Core</button>
+            </div>
+        </div>
         <header class="header">
             <h1>AmethystProtection</h1>
             <p>Редактор конфигурации и сообщений</p>
@@ -21,6 +36,7 @@
             <button class="tab" data-tab="season">Сезон</button>
             <button class="tab" data-tab="punishments">Наказания</button>
             <button class="tab" data-tab="messages">Сообщения</button>
+            <button class="tab hidden-tab" data-tab="tab" style="display:none">TAB</button>
             <button class="tab" data-tab="yaml">YAML</button>
         </nav>
 
@@ -53,6 +69,10 @@
                         <input type="number" data-path="playtime-save-interval-seconds" value="300">
                     </label>
                     <label>
+                        <span>Интервал сброса кэша (сек)</span>
+                        <input type="number" data-path="dirty-flush-interval-seconds" value="60">
+                    </label>
+                    <label>
                         <span>Ссылка на правила</span>
                         <input type="text" data-path="trust-link" value="https://example.com/rules">
                     </label>
@@ -79,6 +99,13 @@
                         <span>Кулдаун наказания (сек)</span>
                         <input type="number" data-path="punishment-cooldown-seconds" value="60">
                     </label>
+                    <label class="full">
+                        <span>Ограничивать новичков только в спавне и фермах</span>
+                        <select data-path="newbie-restrict-only-spawn-and-farm">
+                            <option value="true">Да</option>
+                            <option value="false">Нет</option>
+                        </select>
+                    </label>
                 </div>
             </section>
 
@@ -97,6 +124,17 @@
                     <label>
                         <span>Файл SQLite</span>
                         <input type="text" data-path="database.sqlite.file" value="antigrief.db">
+                    </label>
+                    <label>
+                        <span>Размер пула SQLite</span>
+                        <input type="number" data-path="database.sqlite.pool-size" value="2">
+                    </label>
+                    <label>
+                        <span>Max lifetime SQLite</span>
+                        <div class="input-unit">
+                            <input type="number" data-path="database.sqlite.max-lifetime" value="600000">
+                            <span class="unit">мс</span>
+                        </div>
                     </label>
                 </div>
                 <div class="grid hidden" id="mysql-settings">
@@ -133,15 +171,24 @@
                     </label>
                     <label>
                         <span>Таймаут подключения</span>
-                        <input type="number" data-path="database.mysql.connection-timeout" value="30000">
+                        <div class="input-unit">
+                            <input type="number" data-path="database.mysql.connection-timeout" value="30000">
+                            <span class="unit">мс</span>
+                        </div>
                     </label>
                     <label>
                         <span>Idle таймаут</span>
-                        <input type="number" data-path="database.mysql.idle-timeout" value="600000">
+                        <div class="input-unit">
+                            <input type="number" data-path="database.mysql.idle-timeout" value="600000">
+                            <span class="unit">мс</span>
+                        </div>
                     </label>
                     <label>
                         <span>Max lifetime</span>
-                        <input type="number" data-path="database.mysql.max-lifetime" value="1800000">
+                        <div class="input-unit">
+                            <input type="number" data-path="database.mysql.max-lifetime" value="1800000">
+                            <span class="unit">мс</span>
+                        </div>
                     </label>
                 </div>
             </section>
@@ -190,6 +237,21 @@
                     <label>
                         <span>Поздний сезон</span>
                         <input type="number" data-path="season-events.late-season-day" value="60">
+                    </label>
+                    <label>
+                        <span>Ранний сезон — бан сразу</span>
+                        <select data-path="season-events.early-ban-immediately">
+                            <option value="true">Да</option>
+                            <option value="false">Нет</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span>Порог варнов в середине сезона</span>
+                        <input type="number" data-path="season-events.mid-threshold" value="3">
+                    </label>
+                    <label>
+                        <span>Порог варнов в позднем сезоне</span>
+                        <input type="number" data-path="season-events.late-threshold" value="6">
                     </label>
                 </div>
             </section>
@@ -256,6 +318,65 @@
                     <button id="add-message" class="btn secondary">Добавить ключ</button>
                     <button id="sync-messages" class="btn secondary">Синхронизировать языки</button>
                 </div>
+            </section>
+
+            <section id="tab" class="panel">
+                <h2>Генератор анимаций TAB</h2>
+                <div class="grid">
+                    <label class="full">
+                        <span>Текст</span>
+                        <input type="text" id="tab-text" value="YourServer" placeholder="YourServer">
+                    </label>
+                    <label>
+                        <span>Количество цветов</span>
+                        <input type="number" id="tab-color-count" min="2" max="32" value="5">
+                    </label>
+                    <label>
+                        <span>Тип анимации</span>
+                        <select id="tab-animation-type">
+                            <option value="normal">Normal</option>
+                            <option value="reversed">Reversed</option>
+                            <option value="bounce">Bounce</option>
+                            <option value="fullcycle">Full Cycle</option>
+                            <option value="ease-in-out">Ease In-Out</option>
+                            <option value="edges-left">Edges Left</option>
+                            <option value="edges-right">Edges Right</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span>Интервал смены (мс)</span>
+                        <input type="number" id="tab-interval" min="10" value="50">
+                    </label>
+                </div>
+                <div class="tab-colors" id="tab-colors"></div>
+                <div class="tab-formats" id="tab-formats">
+                    <label class="tab-format-item" title="Жирный">
+                        <input type="checkbox" id="tab-format-bold" value="l" checked>
+                        <span>Жирный</span><small>&l</small>
+                    </label>
+                    <label class="tab-format-item" title="Косой">
+                        <input type="checkbox" id="tab-format-italic" value="o">
+                        <span>Косой</span><small>&o</small>
+                    </label>
+                    <label class="tab-format-item" title="Подчеркнутый">
+                        <input type="checkbox" id="tab-format-underline" value="n">
+                        <span>Подчеркнутый</span><small>&n</small>
+                    </label>
+                    <label class="tab-format-item" title="Зачеркнутый">
+                        <input type="checkbox" id="tab-format-strikethrough" value="m">
+                        <span>Зачеркнутый</span><small>&m</small>
+                    </label>
+                    <label class="tab-format-item" title="Магический">
+                        <input type="checkbox" id="tab-format-magic" value="k">
+                        <span>Магический</span><small>&k</small>
+                    </label>
+                </div>
+                <div class="tab-actions">
+                    <button id="generate-tab" class="btn">Сгенерировать</button>
+                    <button id="download-tab" class="btn secondary">Скачать tab.yml</button>
+                </div>
+                <div class="tab-preview" id="tab-preview"></div>
+                <textarea id="tab-output" class="yaml-output" spellcheck="false"></textarea>
             </section>
 
             <section id="yaml" class="panel">
